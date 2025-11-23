@@ -1,0 +1,332 @@
+name: SDK Integrated CI (Lint, Matrix Test, Coverage & Dashboard)
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: write
+  pages: write
+  id-token: write
+
+jobs:
+  # -----------------------------------------------------------------
+  # JOB 1: 코드 스타일 검사 (변경 없음)
+  # -----------------------------------------------------------------
+  lint-and-format:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Linting Tools
+        run: pip install black isort flake8
+      - name: Run Isort & Black (Auto-fix)
+        run: |
+          isort .
+          black .
+      - name: Commit & Push changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "style: Apply automatic code formatting"
+          branch: ${{ github.head_ref }}
+      - name: Run Flake8
+        run: flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+
+  # -----------------------------------------------------------------
+  # JOB 2: 매트릭스 테스트 (HTML 생성 추가)
+  # -----------------------------------------------------------------
+  test-matrix:
+    needs: lint-and-format
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04]
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
+    env:
+      TL_API_KEY: ${{ secrets.TL_API_KEY }}
+      TL_INDEX_ID: ${{ secrets.TL_INDEX_ID }}
+      TL_INDEX_MARENGO_27: ${{ secrets.TL_INDEX_MARENGO_27 }}
+      TL_INDEX_MARENGO_30: ${{ secrets.TL_INDEX_MARENGO_30 }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Clone SDK repository
+        shell: bash
+        run: |
+          git clone https://github.com/twelvelabs-io/twelvelabs-python.git sdk-source
+          cd sdk-source
+
+      - name: Install SDK in editable mode
+        shell: bash
+        run: |
+          cd sdk-source
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Install Dependencies (Add pytest-html)
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          # pytest-html 플러그인 추가 설치
+          pip install pytest pytest-mock pytest-html
+          if [ -f requirements.txt ]; then 
+            grep -v "^twelvelabs" requirements.txt | grep -v "^$" | pip install -r /dev/stdin || true
+          fi
+
+      - name: Run Tests (Generate XML & HTML)
+        shell: bash
+        run: |
+          # 결과물을 모아둘 폴더 생성
+          mkdir -p test-results
+          # --html 옵션으로 HTML 리포트 생성
+          # --self-contained-html: CSS 등을 HTML 안에 포함시켜 파일 하나로 만듦
+          pytest --junitxml=test-results/junit.xml --html=test-results/report.html --self-contained-html
+
+      # [중요] 폴더째로 업로드 (XML은 통계용, HTML은 뷰어용)
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: result-${{ matrix.python-version }}
+          path: test-results/
+
+  # -----------------------------------------------------------------
+  # JOB 3: 커버리지 측정 (변경 없음)
+  # -----------------------------------------------------------------
+  coverage-report:
+    needs: lint-and-format
+    runs-on: ubuntu-24.04
+    env:
+      TL_API_KEY: ${{ secrets.TL_API_KEY }}
+      TL_INDEX_ID: ${{ secrets.TL_INDEX_ID }}
+      TL_INDEX_MARENGO_27: ${{ secrets.TL_INDEX_MARENGO_27 }}
+      TL_INDEX_MARENGO_30: ${{ secrets.TL_INDEX_MARENGO_30 }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Clone SDK repository
+        run: |
+          git clone https://github.com/twelvelabs-io/twelvelabs-python.git sdk-source
+          cd sdk-source
+          pip install -e .
+      - name: Install Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pytest pytest-cov pytest-mock
+          if [ -f requirements.txt ]; then 
+            grep -v "^twelvelabs" requirements.txt | grep -v "^$" | pip install -r /dev/stdin || true
+          fi
+      - name: Run Tests with Coverage
+        run: |
+          pytest --cov=twelvelabs --cov-report=term --cov-report=html:htmlcov --cov-report=xml:coverage.xml --junitxml=pytest.xml
+      - name: Publish Coverage Comment
+        if: github.event_name == 'pull_request'
+        uses: MishaKav/pytest-coverage-comment@main
+        with:
+          pytest-coverage-path: ./coverage.xml
+          junitxml-path: ./pytest.xml
+          title: 🔍 Test Coverage Report
+          badge-title: Coverage
+          hide-badge: false
+          create-new-comment: false
+          report-only-changed-files: true
+      - name: Upload Coverage HTML Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html-report
+          path: htmlcov/
+
+  # -----------------------------------------------------------------
+  # JOB 4: 대시보드 생성 (심플 버전)
+  # -----------------------------------------------------------------
+  deploy-dashboard:
+    needs: [test-matrix, coverage-report]
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # 1. 모든 테스트 결과 다운로드 (경로: public/reports/result-3.x/)
+      - name: Download Matrix Test Results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: result-*
+          path: public/reports
+
+      # 2. 커버리지 다운로드 (경로: public/coverage/)
+      - name: Download Coverage HTML
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-html-report
+          path: public/coverage
+
+      # 3. Landing Page 생성 스크립트 (복잡한 병합 없이 XML 파싱만 수행)
+      - name: Generate Dashboard Landing Page
+        run: |
+          python -c "
+          import os
+          import glob
+          import xml.etree.ElementTree as ET
+
+          # HTML 헤더 작성
+          html_content = '''
+          <!DOCTYPE html>
+          <html lang=\"en\">
+          <head>
+            <meta charset=\"UTF-8\">
+            <title>SDK CI Dashboard</title>
+            <style>
+              body { font-family: -apple-system, sans-serif; padding: 40px; background: #f6f8fa; color: #24292e; }
+              .container { max-width: 900px; margin: 0 auto; }
+              h1 { border-bottom: 1px solid #eaecef; padding-bottom: 10px; }
+              .card { background: white; padding: 20px; margin-bottom: 20px; border: 1px solid #e1e4e8; border-radius: 6px; }
+              table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+              th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eaecef; }
+              th { background-color: #f6f8fa; }
+              .pass { color: #2ea44f; font-weight: bold; }
+              .fail { color: #cb2431; font-weight: bold; }
+              .btn { display: inline-block; padding: 6px 12px; background: #0366d6; color: white; text-decoration: none; border-radius: 6px; font-size: 14px; }
+              .btn:hover { background: #0255b3; }
+            </style>
+          </head>
+          <body>
+            <div class=\"container\">
+              <h1>🛡️ CI Dashboard</h1>
+              
+              <div class=\"card\">
+                <h2>📊 Coverage Report</h2>
+                <p>Latest code coverage metrics.</p>
+                <a href=\"coverage/index.html\" class=\"btn\">View Coverage Details</a>
+              </div>
+
+              <div class=\"card\">
+                <h2>🧪 Matrix Test Summary</h2>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Python Version</th>
+                      <th>Total</th>
+                      <th>Pass</th>
+                      <th>Fail</th>
+                      <th>Error</th>
+                      <th>Report</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+          '''
+
+          # 각 버전별 결과 폴더 순회 (public/reports/result-*)
+          # 버전 순서대로 정렬하기 위해 glob 결과를 sort
+          report_dirs = sorted(glob.glob('public/reports/result-*'))
+
+          for report_dir in report_dirs:
+              # 폴더명에서 버전 추출 (result-3.8 -> 3.8)
+              version = os.path.basename(report_dir).replace('result-', '')
+              
+              xml_path = os.path.join(report_dir, 'junit.xml')
+              html_link = f'reports/result-{version}/report.html'
+              
+              total = 0
+              failures = 0
+              errors = 0
+              passed = 0
+              
+              try:
+                  # XML 파싱하여 통계 추출
+                  tree = ET.parse(xml_path)
+                  root = tree.getroot()
+                  # root가 testsuites인 경우와 testsuite인 경우 처리
+                  if root.tag == 'testsuites':
+                      for suite in root:
+                          total += int(suite.get('tests', 0))
+                          failures += int(suite.get('failures', 0))
+                          errors += int(suite.get('errors', 0))
+                  else:
+                      total = int(root.get('tests', 0))
+                      failures = int(root.get('failures', 0))
+                      errors = int(root.get('errors', 0))
+                  
+                  passed = total - failures - errors
+                  
+                  status_class = 'fail' if (failures + errors) > 0 else 'pass'
+                  
+                  html_content += f'''
+                    <tr>
+                      <td><strong>Python {version}</strong></td>
+                      <td>{total}</td>
+                      <td class=\"pass\">{passed}</td>
+                      <td class=\"fail\">{failures}</td>
+                      <td class=\"fail\">{errors}</td>
+                      <td><a href=\"{html_link}\" class=\"btn\">View Log</a></td>
+                    </tr>
+                  '''
+              except Exception as e:
+                  print(f'Error parsing {xml_path}: {e}')
+                  html_content += f'''
+                    <tr>
+                      <td>Python {version}</td>
+                      <td colspan=\"5\" class=\"fail\">Error parsing results</td>
+                    </tr>
+                  '''
+
+          html_content += '''
+                  </tbody>
+                </table>
+              </div>
+              <div style=\"text-align: center; color: #666; margin-top: 20px;\">
+                Generated via GitHub Actions
+              </div>
+            </div>
+          </body>
+          </html>
+          '''
+
+          # index.html 저장
+          with open('public/index.html', 'w') as f:
+              f.write(html_content)
+          
+          print('Dashboard generated successfully at public/index.html')
+          "
+
+      # 4. GitHub Pages 아티팩트 업로드
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public/
+
+      # 5. 배포
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
