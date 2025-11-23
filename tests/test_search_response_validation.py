@@ -61,7 +61,9 @@ class TestSearchResponseValidation:
             ranks = [r.rank for r in results if r.rank is not None]
             if len(ranks) > 0:
                 assert all(isinstance(r, int) for r in ranks), "rank must be an integer"
-                assert all(r > 0 for r in ranks), "rank must be greater than or equal to 1"
+                assert all(
+                    r > 0 for r in ranks
+                ), "rank must be greater than or equal to 1"
 
     @pytest.mark.parametrize(
         "index_id",
@@ -136,12 +138,8 @@ class TestSearchResponseValidation:
 
             for item in results:
                 if item.video_id is not None:
-                    assert isinstance(
-                        item.video_id, str
-                    ), "video_id must be a string"
-                    assert (
-                        len(item.video_id) > 0
-                    ), "video_id must not be empty"
+                    assert isinstance(item.video_id, str), "video_id must be a string"
+                    assert len(item.video_id) > 0, "video_id must not be empty"
 
     @pytest.mark.parametrize(
         "index_id",
@@ -225,16 +223,12 @@ class TestSearchResponseValidation:
 
             for item in results:
                 if item.id is not None and item.clips is not None:
-                    assert isinstance(
-                        item.clips, list
-                    ), "clips must be a list"
+                    assert isinstance(item.clips, list), "clips must be a list"
                     assert len(item.clips) > 0, "clips must not be empty"
 
                     # Validate each clip in clips array
                     for clip in item.clips:
-                        assert (
-                            clip.video_id is not None
-                        ), "clip.video_id must exist"
+                        assert clip.video_id is not None, "clip.video_id must exist"
                         assert clip.start is not None, "clip.start must exist"
                         assert clip.end is not None, "clip.end must exist"
                         assert (

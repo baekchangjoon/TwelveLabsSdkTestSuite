@@ -426,9 +426,7 @@ class TestSearchErrorHandling:
             print(
                 f"\n[ERROR CODE] test_search_with_empty_filter_string (index: {index_name}): {error_code}"
             )
-            assert (
-                error_code != ""
-            ), f"Error code could not be extracted. Error: {e}"
+            assert error_code != "", f"Error code could not be extracted. Error: {e}"
 
     @pytest.mark.parametrize(
         "index_id",

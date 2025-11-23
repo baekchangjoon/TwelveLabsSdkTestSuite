@@ -105,9 +105,9 @@ class TestSearchQueryMediaFile:
     )
     def test_search_with_image_file_audio_only(self, client, index_id, request):
         """Test image file search with audio option only
-        
-        Note: According to API behavior, query_media_type='image' requires 
-        search_options to contain 'visual'. This constraint is not explicitly 
+
+        Note: According to API behavior, query_media_type='image' requires
+        search_options to contain 'visual'. This constraint is not explicitly
         documented in search.md, so this test is skipped.
         """
         index_name = get_index_name(request)
@@ -143,7 +143,9 @@ class TestSearchQueryMediaFile:
             # Check id and clips fields when grouped by video
             for item in results:
                 if item.id is not None:
-                    assert item.clips is not None, "clips should exist when grouped by video"
+                    assert (
+                        item.clips is not None
+                    ), "clips should exist when grouped by video"
                     assert len(item.clips) > 0, "clips should not be empty"
                     # Also validate items within clips
                     if item.clips:
@@ -386,7 +388,9 @@ class TestSearchQueryMediaFile:
         # Create a temporary invalid file (text file instead of image)
         import tempfile
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as tmp_file:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False
+        ) as tmp_file:
             tmp_file.write("This is not an image file")
             tmp_path = tmp_file.name
 
@@ -415,4 +419,3 @@ class TestSearchQueryMediaFile:
             # Clean up temporary file
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
-

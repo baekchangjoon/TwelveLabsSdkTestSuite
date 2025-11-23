@@ -122,7 +122,9 @@ class TestSearchQueryText:
         Marengo 2.7: maximum 77 tokens, Marengo 3.0: maximum 500 tokens
         Exceeding token limit should raise parameter_invalid error.
         """
-        long_query = "test " * 100  # Approximately 500 characters (exceeds limit in Marengo 2.7)
+        long_query = (
+            "test " * 100
+        )  # Approximately 500 characters (exceeds limit in Marengo 2.7)
         index_name = get_index_name(request)
 
         if is_marengo30(index_name):
